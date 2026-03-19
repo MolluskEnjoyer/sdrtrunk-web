@@ -28,6 +28,7 @@ import io.github.dsheirer.web.handler.NowPlayingApiHandler;
 import io.github.dsheirer.web.handler.RadioReferenceApiHandler;
 import io.github.dsheirer.web.handler.StaticFileHandler;
 import io.github.dsheirer.web.handler.StatusApiHandler;
+import io.github.dsheirer.web.handler.SpectrumApiHandler;
 import io.github.dsheirer.web.handler.StreamingApiHandler;
 import io.github.dsheirer.web.handler.TunerApiHandler;
 import org.slf4j.Logger;
@@ -85,6 +86,7 @@ public class WebServer
 
         NowPlayingApiHandler nowPlayingHandler = new NowPlayingApiHandler(mPlaylistManager);
         StreamingApiHandler streamingHandler = new StreamingApiHandler(mPlaylistManager);
+        SpectrumApiHandler spectrumHandler = new SpectrumApiHandler(mTunerManager);
 
         mServer.createContext("/api/rr/", rrHandler);
         mServer.createContext("/api/decoder/", decoderHandler);
@@ -92,6 +94,7 @@ public class WebServer
         mServer.createContext("/api/tuners", tunerHandler);
         mServer.createContext("/api/channels/", nowPlayingHandler);
         mServer.createContext("/api/streaming/", streamingHandler);
+        mServer.createContext("/api/spectrum/", spectrumHandler);
 
         // Static file handler serves the web UI
         mServer.createContext("/", new StaticFileHandler());

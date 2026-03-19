@@ -177,6 +177,21 @@ table.stream-table { width:100%; border-collapse:collapse; }
 .stream-state-error { background:rgba(248,81,73,.15); color:var(--red); }
 .stream-empty { padding:16px; text-align:center; color:var(--text2); font-size:11px; }
 
+/* Spectrum & Waterfall */
+.spectrum-container { display:flex; flex-direction:column; flex:1; min-height:0; background:var(--bg0); position:relative; }
+.spectrum-toolbar { display:flex; align-items:center; gap:8px; padding:4px 10px; background:var(--bg1); border-bottom:1px solid var(--border); flex-shrink:0; }
+.spectrum-toolbar button { padding:3px 10px; font-size:11px; }
+.spectrum-toolbar select, .spectrum-toolbar label { font-size:11px; color:var(--text2); }
+.spectrum-toolbar select { background:var(--bg0); border:1px solid var(--border); color:var(--text); padding:2px 4px; border-radius:3px; }
+.spectrum-canvas-wrap { flex:1; display:flex; flex-direction:column; min-height:0; position:relative; }
+.spectrum-canvas-wrap canvas { width:100%; display:block; }
+#spectrum-canvas { height:40%; min-height:80px; }
+#waterfall-canvas { flex:1; min-height:80px; }
+.spectrum-label { position:absolute; bottom:2px; left:8px; font-size:10px; color:var(--text2); font-family:var(--mono); pointer-events:none; z-index:2; }
+.spectrum-label-right { left:auto; right:8px; }
+.spectrum-freq-axis { display:flex; justify-content:space-between; padding:0 4px; font-size:9px; color:var(--text2); font-family:var(--mono); background:var(--bg1); border-top:1px solid var(--border); border-bottom:1px solid var(--border); flex-shrink:0; height:16px; align-items:center; }
+.spectrum-paused-badge { position:absolute; top:8px; right:10px; background:rgba(248,81,73,.8); color:#fff; padding:2px 8px; border-radius:3px; font-size:10px; font-weight:700; z-index:3; display:none; }
+
 /* Responsive */
 @media(max-width:900px) { .main { grid-template-columns:1fr; } .panel { border-right:none; border-bottom:1px solid var(--border); max-height:40vh; } }
 </style>
@@ -244,6 +259,7 @@ table.stream-table { width:100%; border-collapse:collapse; }
   <div class="panel" style="display:flex;flex-direction:column">
     <div class="center-tabs">
       <div class="center-tab active" onclick="App.switchTab('now-playing')">Now Playing</div>
+      <div class="center-tab" onclick="App.switchTab('spectrum')">Spectrum</div>
       <div class="center-tab" onclick="App.switchTab('talkgroups')">Talkgroups</div>
     </div>
 
@@ -259,6 +275,25 @@ table.stream-table { width:100%; border-collapse:collapse; }
         <div class="np-section-title"><span>Streaming Status</span></div>
         <div id="stream-table-wrap">
           <div class="stream-empty" id="stream-empty">No streams configured</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Spectrum Tab -->
+    <div class="tab-content" id="tab-spectrum">
+      <div class="spectrum-container">
+        <div class="spectrum-toolbar">
+          <button class="btn btn-green btn-sm" id="btn-spec-start" onclick="App.startSpectrum()">&#9654; Start</button>
+          <button class="btn btn-red btn-sm" id="btn-spec-stop" onclick="App.stopSpectrum()" style="display:none">&#9632; Stop</button>
+          <label>FFT:</label>
+          <select id="spec-fft-info" disabled><option>4096</option></select>
+          <span id="spec-info" style="font-size:10px;color:var(--text2);margin-left:auto"></span>
+        </div>
+        <div class="spectrum-canvas-wrap">
+          <canvas id="spectrum-canvas"></canvas>
+          <div class="spectrum-freq-axis" id="spectrum-freq-axis"></div>
+          <canvas id="waterfall-canvas"></canvas>
+          <div class="spectrum-paused-badge" id="spec-paused">PAUSED</div>
         </div>
       </div>
     </div>
@@ -353,10 +388,12 @@ const App = {
   switchTab(tabId) {
     document.querySelectorAll('.center-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-    const idx = tabId === 'now-playing' ? 0 : 1;
-    document.querySelectorAll('.center-tab')[idx].classList.add('active');
+    const tabs = ['now-playing','spectrum','talkgroups'];
+    const idx = tabs.indexOf(tabId);
+    if (idx >= 0) document.querySelectorAll('.center-tab')[idx].classList.add('active');
     $('tab-' + tabId).classList.add('active');
     this.activeTab = tabId;
+    if (tabId === 'spectrum') this.resizeSpectrumCanvases();
   },
 
   async api(path, method, body) {
@@ -768,6 +805,214 @@ const App = {
     });
     html += '</tbody></table>';
     $('stream-table-wrap').innerHTML = html;
+  },
+
+  // --- Spectrum & Waterfall ---
+  specRunning: false,
+  specTimer: null,
+  specCtx: null,
+  wfCtx: null,
+  wfImageData: null,
+  specCenterFreq: 0,
+  specSampleRate: 0,
+  specFftSize: 4096,
+  specDbMin: -120,
+  specDbMax: -20,
+  specAvg: null,
+  specAvgFactor: 0.4,
+
+  resizeSpectrumCanvases() {
+    const sc = $('spectrum-canvas');
+    const wc = $('waterfall-canvas');
+    if (!sc || !wc) return;
+    const wrap = sc.parentElement;
+    const toolbarH = 0;
+    const axisH = 16;
+    const wrapH = wrap.clientHeight;
+    const specH = Math.max(80, Math.floor(wrapH * 0.35));
+    const wfH = Math.max(80, wrapH - specH - axisH);
+    const w = wrap.clientWidth;
+    sc.width = w; sc.height = specH;
+    wc.width = w; wc.height = wfH;
+    this.specCtx = sc.getContext('2d');
+    this.wfCtx = wc.getContext('2d');
+    this.wfImageData = null; // reset waterfall
+  },
+
+  async startSpectrum() {
+    try {
+      const r = await this.api('spectrum/start', 'POST');
+      if (r.status === 'started' || r.status === 'already_running') {
+        this.specRunning = true;
+        $('btn-spec-start').style.display = 'none';
+        $('btn-spec-stop').style.display = '';
+        $('spec-info').textContent = r.tuner ? ('Tuner: ' + r.tuner) : '';
+        this.resizeSpectrumCanvases();
+        this.specTimer = setInterval(() => this.pollSpectrum(), 80);
+        this.toast('Spectrum started', 'success');
+      }
+    } catch(e) { this.toast('Failed to start spectrum: ' + e.message, 'error'); }
+  },
+
+  async stopSpectrum() {
+    try {
+      await this.api('spectrum/stop', 'POST');
+    } catch(e) {}
+    this.specRunning = false;
+    if (this.specTimer) { clearInterval(this.specTimer); this.specTimer = null; }
+    $('btn-spec-stop').style.display = 'none';
+    $('btn-spec-start').style.display = '';
+    $('spec-info').textContent = '';
+    this.specAvg = null;
+    this.toast('Spectrum stopped', 'info');
+  },
+
+  async pollSpectrum() {
+    if (!this.specRunning || this.activeTab !== 'spectrum') return;
+    try {
+      const r = await this.api('spectrum/data');
+      if (!r.running || !r.bins) return;
+      this.specCenterFreq = r.center_freq || 0;
+      this.specSampleRate = r.sample_rate || 0;
+      this.specFftSize = r.fft_size || 4096;
+      this.renderSpectrumFrame(r.bins);
+    } catch(e) { /* silent */ }
+  },
+
+  renderSpectrumFrame(bins) {
+    // Exponential averaging for smoothing
+    if (!this.specAvg || this.specAvg.length !== bins.length) {
+      this.specAvg = new Float32Array(bins);
+    } else {
+      const a = this.specAvgFactor;
+      for (let i = 0; i < bins.length; i++) {
+        this.specAvg[i] = this.specAvg[i] * (1 - a) + bins[i] * a;
+      }
+    }
+    this.drawSpectrum(this.specAvg);
+    this.drawWaterfall(this.specAvg);
+    this.drawFreqAxis();
+  },
+
+  drawSpectrum(bins) {
+    const ctx = this.specCtx;
+    if (!ctx) return;
+    const c = $('spectrum-canvas');
+    const w = c.width, h = c.height;
+    const dbMin = this.specDbMin, dbMax = this.specDbMax;
+    const dbRange = dbMax - dbMin;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Background
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, w, h);
+
+    // Grid lines
+    ctx.strokeStyle = 'rgba(48,54,61,0.6)';
+    ctx.lineWidth = 0.5;
+    for (let db = Math.ceil(dbMin / 10) * 10; db <= dbMax; db += 10) {
+      const y = h - ((db - dbMin) / dbRange) * h;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      ctx.fillStyle = '#8b949e';
+      ctx.font = '9px monospace';
+      ctx.fillText(db + ' dB', 3, y - 2);
+    }
+
+    // Spectrum line
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, 'rgba(88,166,255,0.9)');
+    grad.addColorStop(0.5, 'rgba(63,185,80,0.7)');
+    grad.addColorStop(1, 'rgba(210,153,34,0.4)');
+
+    ctx.beginPath();
+    const binW = w / bins.length;
+    for (let i = 0; i < bins.length; i++) {
+      const x = i * binW;
+      const db = Math.max(dbMin, Math.min(dbMax, bins[i]));
+      const y = h - ((db - dbMin) / dbRange) * h;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = '#58a6ff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Fill under curve
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.globalAlpha = 0.15;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  },
+
+  drawWaterfall(bins) {
+    const ctx = this.wfCtx;
+    if (!ctx) return;
+    const c = $('waterfall-canvas');
+    const w = c.width, h = c.height;
+    const dbMin = this.specDbMin, dbMax = this.specDbMax;
+    const dbRange = dbMax - dbMin;
+
+    // Scroll existing image down by 1 pixel
+    if (h > 1) {
+      const imgData = ctx.getImageData(0, 0, w, h - 1);
+      ctx.putImageData(imgData, 0, 1);
+    }
+
+    // Draw new row at top
+    const row = ctx.createImageData(w, 1);
+    const binW = bins.length / w;
+    for (let x = 0; x < w; x++) {
+      const binIdx = Math.min(bins.length - 1, Math.floor(x * binW));
+      const db = Math.max(dbMin, Math.min(dbMax, bins[binIdx]));
+      const norm = (db - dbMin) / dbRange; // 0..1
+      const rgb = this.waterfallColor(norm);
+      const px = x * 4;
+      row.data[px] = rgb[0];
+      row.data[px + 1] = rgb[1];
+      row.data[px + 2] = rgb[2];
+      row.data[px + 3] = 255;
+    }
+    ctx.putImageData(row, 0, 0);
+  },
+
+  // Color map matching SDRTrunk's Spectra waterfall palette
+  waterfallColor(norm) {
+    // Blue -> Cyan -> Green -> Yellow -> Red -> White
+    if (norm < 0.2) {
+      const t = norm / 0.2;
+      return [0, 0, Math.floor(80 + 175 * t)];
+    } else if (norm < 0.4) {
+      const t = (norm - 0.2) / 0.2;
+      return [0, Math.floor(255 * t), 255];
+    } else if (norm < 0.6) {
+      const t = (norm - 0.4) / 0.2;
+      return [0, 255, Math.floor(255 * (1 - t))];
+    } else if (norm < 0.8) {
+      const t = (norm - 0.6) / 0.2;
+      return [Math.floor(255 * t), 255, 0];
+    } else if (norm < 0.95) {
+      const t = (norm - 0.8) / 0.15;
+      return [255, Math.floor(255 * (1 - t)), 0];
+    } else {
+      const t = (norm - 0.95) / 0.05;
+      return [255, Math.floor(200 * t), Math.floor(200 * t)];
+    }
+  },
+
+  drawFreqAxis() {
+    const axis = $('spectrum-freq-axis');
+    if (!axis || !this.specCenterFreq || !this.specSampleRate) return;
+    const cf = this.specCenterFreq;
+    const sr = this.specSampleRate;
+    const lo = (cf - sr / 2) / 1e6;
+    const hi = (cf + sr / 2) / 1e6;
+    const mid = cf / 1e6;
+    const q1 = (cf - sr / 4) / 1e6;
+    const q3 = (cf + sr / 4) / 1e6;
+    axis.innerHTML = '<span>' + lo.toFixed(3) + '</span><span>' + q1.toFixed(3) + '</span><span style="font-weight:700;color:var(--accent)">' + mid.toFixed(4) + ' MHz</span><span>' + q3.toFixed(3) + '</span><span>' + hi.toFixed(3) + '</span>';
   }
 };
 
@@ -775,6 +1020,11 @@ const App = {
 ['ctrl-freq','follow-all'].forEach(id => {
   $(id).addEventListener('change', () => {});
   $(id).addEventListener('input', () => {});
+});
+
+// Resize spectrum canvases on window resize
+window.addEventListener('resize', () => {
+  if (App.activeTab === 'spectrum' && App.specRunning) App.resizeSpectrumCanvases();
 });
 
 App.init();
