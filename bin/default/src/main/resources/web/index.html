@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SDRTrunk Web Interface</title>
+<style>
+:root {
+  --bg0: #0d1117; --bg1: #161b22; --bg2: #1c2128; --bg3: #21262d;
+  --border: #30363d; --text: #e6edf3; --text2: #8b949e;
+  --accent: #58a6ff; --accent2: #79c0ff;
+  --green: #3fb950; --yellow: #d29922; --red: #f85149;
+  --mono: 'Consolas','Monaco','Courier New',monospace;
+  --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --radius: 6px;
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:var(--sans); background:var(--bg0); color:var(--text); min-height:100vh; display:flex; flex-direction:column; font-size:13px; }
+a { color:var(--accent); }
+
+/* Header */
+.header { display:flex; align-items:center; justify-content:space-between; padding:0 16px; height:42px; background:var(--bg1); border-bottom:1px solid var(--border); flex-shrink:0; }
+.header-left { display:flex; align-items:center; gap:10px; }
+.header-left h1 { font-size:15px; font-weight:600; }
+.header-right { display:flex; align-items:center; gap:12px; font-size:12px; color:var(--text2); }
+.dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+.dot-off { background:var(--text2); } .dot-on { background:var(--green); } .dot-err { background:var(--red); }
+
+/* Layout */
+.main { display:grid; grid-template-columns:280px 1fr 260px; flex:1; min-height:0; }
+.panel { overflow-y:auto; border-right:1px solid var(--border); }
+.panel:last-child { border-right:none; }
+.panel-section { padding:12px; border-bottom:1px solid var(--border); }
+.panel-title { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--text2); margin-bottom:8px; }
+
+/* Forms */
+input[type=text], input[type=password], input[type=number], select {
+  background:var(--bg0); border:1px solid var(--border); color:var(--text); padding:5px 8px; border-radius:var(--radius); width:100%; font-size:12px; font-family:inherit;
+}
+input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px rgba(88,166,255,.25); }
+input[type=range] { width:100%; accent-color:var(--accent); }
+label { display:block; font-size:11px; color:var(--text2); margin-bottom:3px; }
+.form-row { margin-bottom:8px; }
+.form-row-inline { display:flex; gap:6px; margin-bottom:8px; }
+.form-row-inline input { flex:1; }
+.check-label { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text); cursor:pointer; }
+.check-label input[type=checkbox] { accent-color:var(--accent); }
+
+/* Buttons */
+.btn { padding:5px 14px; border:none; border-radius:var(--radius); cursor:pointer; font-size:12px; font-weight:500; font-family:inherit; transition:opacity .15s; }
+.btn:hover { opacity:.85; } .btn:disabled { opacity:.4; cursor:default; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-green { background:var(--green); color:#fff; }
+.btn-red { background:var(--red); color:#fff; }
+.btn-sm { padding:3px 8px; font-size:11px; }
+.btn-block { width:100%; }
+.btn-outline { background:transparent; border:1px solid var(--border); color:var(--text2); }
+
+/* Status indicators */
+.login-ok { display:flex; align-items:center; gap:8px; padding:8px; background:rgba(63,185,80,.1); border:1px solid rgba(63,185,80,.3); border-radius:var(--radius); font-size:12px; }
+.login-ok .check { color:var(--green); font-size:16px; }
+
+/* System list */
+.sys-item { padding:6px 8px; border-radius:var(--radius); cursor:pointer; font-size:12px; display:flex; justify-content:space-between; }
+.sys-item:hover { background:var(--bg2); }
+.sys-item.active { background:var(--bg3); border:1px solid var(--accent); }
+.sys-type { font-size:10px; color:var(--text2); }
+
+/* Sites */
+.site-card { background:var(--bg0); border:1px solid var(--border); border-radius:var(--radius); padding:8px; margin-bottom:6px; font-size:11px; }
+.site-name { font-weight:600; margin-bottom:4px; }
+.freq-item { padding:1px 0; font-family:var(--mono); font-size:11px; }
+.freq-ctrl { color:var(--green); font-weight:600; }
+
+/* Talkgroup table */
+.tg-container { flex:1; overflow-y:auto; }
+.tg-empty { padding:40px 20px; text-align:center; color:var(--text2); }
+.tg-search { padding:8px 12px; border-bottom:1px solid var(--border); }
+.tg-search input { font-size:12px; }
+.tg-footer { padding:6px 12px; border-top:1px solid var(--border); font-size:11px; color:var(--text2); }
+.cat-header { padding:6px 12px; background:var(--bg1); font-size:11px; font-weight:600; cursor:pointer; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border); user-select:none; }
+.cat-header:hover { background:var(--bg2); }
+.cat-badge { background:var(--bg3); padding:1px 6px; border-radius:10px; font-size:10px; color:var(--text2); font-weight:400; }
+table.tg-table { width:100%; border-collapse:collapse; }
+.tg-table th { background:var(--bg2); padding:4px 8px; text-align:left; font-size:10px; text-transform:uppercase; color:var(--text2); font-weight:600; letter-spacing:.3px; position:sticky; top:0; z-index:1; }
+.tg-table td { padding:3px 8px; border-bottom:1px solid var(--border); font-size:12px; }
+.tg-table tr:hover { background:var(--bg2); }
+.tg-table tr.selected { background:rgba(88,166,255,.1); }
+.tg-table td:first-child { width:28px; text-align:center; }
+.tg-table .tg-id { font-family:var(--mono); font-weight:500; }
+.mode-badge { display:inline-block; padding:0 5px; border-radius:3px; font-size:10px; font-weight:600; }
+.mode-D { background:rgba(88,166,255,.2); color:var(--accent); }
+.mode-A { background:rgba(63,185,80,.2); color:var(--green); }
+.mode-M { background:rgba(210,153,34,.2); color:var(--yellow); }
+.mode-T { background:rgba(121,192,255,.2); color:var(--accent2); }
+.mode-E { background:rgba(248,81,73,.2); color:var(--red); }
+.enc-icon { color:var(--red); font-size:11px; }
+
+/* Selected TGs */
+.sel-item { display:flex; justify-content:space-between; align-items:center; padding:3px 6px; font-size:11px; border-bottom:1px solid var(--border); }
+.sel-item .tg-id { font-family:var(--mono); }
+.sel-remove { cursor:pointer; color:var(--text2); font-size:14px; }
+.sel-remove:hover { color:var(--red); }
+
+/* Control section */
+.ctrl-group { margin-bottom:10px; }
+.ctrl-btns { display:flex; gap:6px; margin-top:12px; }
+
+/* Tuner info */
+.tuner-card { background:var(--bg0); border:1px solid var(--border); border-radius:var(--radius); padding:6px 8px; margin-bottom:4px; font-size:11px; display:flex; justify-content:space-between; align-items:center; }
+.tuner-status { font-size:10px; padding:1px 6px; border-radius:3px; }
+.tuner-ok { background:rgba(63,185,80,.2); color:var(--green); }
+.tuner-err { background:rgba(248,81,73,.2); color:var(--red); }
+
+/* Activity log */
+.log-box { background:var(--bg0); border:1px solid var(--border); border-radius:var(--radius); padding:6px; font-family:var(--mono); font-size:10px; max-height:200px; overflow-y:auto; }
+.log-line { padding:1px 0; color:var(--text2); white-space:pre-wrap; word-break:break-all; }
+.log-line.err { color:var(--red); }
+.log-line.call { color:var(--green); }
+
+/* Status bar */
+.statusbar { display:flex; align-items:center; gap:16px; padding:0 12px; height:26px; background:var(--bg1); border-top:1px solid var(--border); font-size:11px; color:var(--text2); flex-shrink:0; }
+.statusbar .dot { width:6px; height:6px; }
+
+/* Toast */
+.toast-container { position:fixed; top:50px; right:16px; z-index:1000; display:flex; flex-direction:column; gap:6px; }
+.toast { padding:8px 14px; border-radius:var(--radius); font-size:12px; animation:toast-in .3s; max-width:350px; }
+@keyframes toast-in { from { opacity:0; transform:translateX(30px); } to { opacity:1; transform:none; } }
+.toast-info { background:var(--bg3); border:1px solid var(--border); }
+.toast-error { background:rgba(248,81,73,.15); border:1px solid var(--red); color:var(--red); }
+.toast-success { background:rgba(63,185,80,.15); border:1px solid var(--green); color:var(--green); }
+
+/* Spinner */
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .6s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* Center tabs */
+.center-tabs { display:flex; border-bottom:1px solid var(--border); background:var(--bg1); flex-shrink:0; }
+.center-tab { padding:8px 18px; font-size:12px; font-weight:600; color:var(--text2); cursor:pointer; border-bottom:2px solid transparent; transition:all .15s; user-select:none; }
+.center-tab:hover { color:var(--text); background:var(--bg2); }
+.center-tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+.tab-content { display:none; flex:1; overflow-y:auto; flex-direction:column; }
+.tab-content.active { display:flex; }
+
+/* Now Playing table */
+.np-section { padding:0; flex:1; display:flex; flex-direction:column; min-height:0; overflow-y:auto; }
+.np-section-title { padding:8px 12px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:var(--text2); background:var(--bg1); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+.np-section-title .np-count { font-weight:400; font-size:10px; }
+table.np-table { width:100%; border-collapse:collapse; }
+.np-table th { background:var(--bg2); padding:4px 8px; text-align:left; font-size:10px; text-transform:uppercase; color:var(--text2); font-weight:600; letter-spacing:.3px; position:sticky; top:0; z-index:1; white-space:nowrap; }
+.np-table td { padding:4px 8px; border-bottom:1px solid var(--border); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:180px; }
+.np-table tr:hover { background:var(--bg2); }
+.np-table .np-freq { font-family:var(--mono); font-size:11px; }
+.np-table .np-from, .np-table .np-to { font-family:var(--mono); }
+.np-state { display:inline-block; padding:1px 8px; border-radius:3px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; }
+.np-state-CALL { background:#1a3a7a; color:#ffd700; }
+.np-state-CONTROL { background:#b8860b; color:#00008b; }
+.np-state-ACTIVE { background:#006080; color:#00e5ff; }
+.np-state-DATA { background:#1a5e1a; color:#90ee90; }
+.np-state-ENCRYPTED { background:#5a005a; color:#ff80ff; }
+.np-state-IDLE { background:var(--bg3); color:var(--text2); }
+.np-state-FADE { background:var(--bg3); color:#666; }
+.np-state-TEARDOWN { background:var(--bg3); color:#666; }
+.np-empty { padding:30px 20px; text-align:center; color:var(--text2); font-size:12px; }
+
+/* Streaming Status table */
+.stream-section { flex-shrink:0; border-top:2px solid var(--border); }
+table.stream-table { width:100%; border-collapse:collapse; }
+.stream-table th { background:var(--bg2); padding:4px 8px; text-align:left; font-size:10px; text-transform:uppercase; color:var(--text2); font-weight:600; letter-spacing:.3px; white-space:nowrap; }
+.stream-table td { padding:4px 8px; border-bottom:1px solid var(--border); font-size:11px; }
+.stream-table tr:hover { background:var(--bg2); }
+.stream-state { display:inline-block; padding:1px 6px; border-radius:3px; font-size:10px; font-weight:600; }
+.stream-state-Connected { background:rgba(63,185,80,.2); color:var(--green); }
+.stream-state-Connecting { background:rgba(88,166,255,.2); color:var(--accent); }
+.stream-state-Disabled { background:var(--bg3); color:var(--text2); }
+.stream-state-Ready { background:rgba(210,153,34,.15); color:var(--yellow); }
+.stream-state-error { background:rgba(248,81,73,.15); color:var(--red); }
+.stream-empty { padding:16px; text-align:center; color:var(--text2); font-size:11px; }
+
+/* Responsive */
+@media(max-width:900px) { .main { grid-template-columns:1fr; } .panel { border-right:none; border-bottom:1px solid var(--border); max-height:40vh; } }
+</style>
+</head>
+<body>
+
+<div class="toast-container" id="toasts"></div>
+
+<header class="header">
+  <div class="header-left">
+    <span style="font-size:18px">&#x1F4E1;</span>
+    <h1>SDRTrunk Web Interface</h1>
+  </div>
+  <div class="header-right">
+    <span class="dot dot-off" id="hdr-rr-dot"></span>
+    <span id="hdr-rr-text">RadioReference: Not Connected</span>
+    <span style="margin-left:8px" class="dot dot-off" id="hdr-dec-dot"></span>
+    <span id="hdr-dec-text">Decoder: Idle</span>
+  </div>
+</header>
+
+<div class="main">
+  <!-- LEFT PANEL -->
+  <div class="panel" style="background:var(--bg1)">
+    <!-- Login -->
+    <div class="panel-section" id="sec-login">
+      <div class="panel-title">RadioReference Login</div>
+      <div id="login-form">
+        <div class="form-row"><input type="text" id="rr-user" placeholder="Username" autocomplete="username"></div>
+        <div class="form-row"><input type="password" id="rr-pass" placeholder="Password" autocomplete="current-password"></div>
+        <div class="form-row"><label class="check-label"><input type="checkbox" id="rr-save"> Remember credentials</label></div>
+        <button class="btn btn-primary btn-block" id="btn-login" onclick="App.login()">Login</button>
+      </div>
+      <div id="login-ok" style="display:none">
+        <div class="login-ok"><span class="check">&#10003;</span><div><strong id="login-user"></strong><br><span style="font-size:11px;color:var(--text2)">Premium expires: <span id="login-exp"></span></span></div></div>
+        <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="App.logout()">Logout</button>
+      </div>
+    </div>
+
+    <!-- System Discovery -->
+    <div class="panel-section" id="sec-systems" style="display:none">
+      <div class="panel-title">Find Systems</div>
+      <div class="form-row-inline">
+        <input type="text" id="zip-input" placeholder="Zip Code" maxlength="5">
+        <button class="btn btn-primary" id="btn-zip" onclick="App.searchZip()">Search</button>
+      </div>
+      <div id="zip-info" style="display:none; font-size:11px; color:var(--text2); margin-bottom:8px;"></div>
+      <div id="system-list"></div>
+    </div>
+
+    <!-- Sites -->
+    <div class="panel-section" id="sec-sites" style="display:none">
+      <div class="panel-title">Sites &amp; Frequencies</div>
+      <div id="sites-list"></div>
+    </div>
+
+    <!-- Tuners -->
+    <div class="panel-section" id="sec-tuners">
+      <div class="panel-title">SDR Tuners</div>
+      <div id="tuner-list"><span style="color:var(--text2);font-size:11px">Loading...</span></div>
+    </div>
+  </div>
+
+  <!-- CENTER PANEL -->
+  <div class="panel" style="display:flex;flex-direction:column">
+    <div class="center-tabs">
+      <div class="center-tab active" onclick="App.switchTab('now-playing')">Now Playing</div>
+      <div class="center-tab" onclick="App.switchTab('talkgroups')">Talkgroups</div>
+    </div>
+
+    <!-- Now Playing Tab -->
+    <div class="tab-content active" id="tab-now-playing">
+      <div class="np-section">
+        <div class="np-section-title"><span>Now Playing</span><span class="np-count" id="np-count">0 channels</span></div>
+        <div id="np-table-wrap">
+          <div class="np-empty" id="np-empty">No active channels</div>
+        </div>
+      </div>
+      <div class="stream-section">
+        <div class="np-section-title"><span>Streaming Status</span></div>
+        <div id="stream-table-wrap">
+          <div class="stream-empty" id="stream-empty">No streams configured</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Talkgroups Tab -->
+    <div class="tab-content" id="tab-talkgroups">
+      <div class="tg-search"><input type="text" id="tg-search" placeholder="&#128269; Search talkgroups..." oninput="App.filterTG()"></div>
+      <div class="tg-container" id="tg-container">
+        <div class="tg-empty">Login to RadioReference and select a system to browse talkgroups.</div>
+      </div>
+      <div class="tg-footer" id="tg-footer" style="display:none"><span id="tg-count"></span></div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="panel" style="background:var(--bg1)">
+    <!-- Selected TGs -->
+    <div class="panel-section">
+      <div class="panel-title">Selected Talkgroups (<span id="sel-count">0</span>)</div>
+      <div id="sel-list" style="max-height:140px;overflow-y:auto"></div>
+      <button class="btn btn-outline btn-sm" style="margin-top:6px" onclick="App.clearSel()">Clear All</button>
+    </div>
+
+    <!-- Decoder Control -->
+    <div class="panel-section">
+      <div class="panel-title">Decoder Control</div>
+      <div class="ctrl-group"><label>Control Frequency (MHz)</label><input type="text" id="ctrl-freq" placeholder="852.7375"></div>
+      <div class="ctrl-group"><label class="check-label"><input type="checkbox" id="follow-all"> Follow All Talkgroups</label></div>
+      <div class="ctrl-btns">
+        <button class="btn btn-green btn-block" id="btn-start" onclick="App.startDec()">&#9654; Start Decoder</button>
+        <button class="btn btn-red btn-block" id="btn-stop" onclick="App.stopDec()" style="display:none">&#9632; Stop</button>
+      </div>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="panel-section">
+      <div class="panel-title">Activity Log</div>
+      <div class="log-box" id="log-box"></div>
+    </div>
+  </div>
+</div>
+
+<footer class="statusbar">
+  <span class="dot dot-off" id="sb-dot"></span>
+  <span id="sb-state">Idle</span>
+  <span>|</span>
+  <span>TG: <strong id="sb-tg">--</strong></span>
+  <span>|</span>
+  <span>Freq: <strong id="sb-freq">--</strong></span>
+  <span style="flex:1"></span>
+  <span id="sb-msg">SDRTrunk Backend</span>
+</footer>
+
+<script>
+const $ = s => document.getElementById(s);
+const App = {
+  rr: { loggedIn:false, username:'', expires:'' },
+  systems: [],
+  talkgroups: [],
+  sites: [],
+  selectedTGs: new Set(),
+  selectedSysId: null,
+  decoderRunning: false,
+  pollTimer: null,
+  nowPlayingChannels: [],
+  streams: [],
+  activeTab: 'now-playing',
+
+  init() {
+    const saved = localStorage.getItem('rr_creds');
+    if (saved) {
+      try {
+        const c = JSON.parse(saved);
+        $('rr-user').value = c.u || '';
+        $('rr-pass').value = c.p || '';
+        $('rr-save').checked = true;
+      } catch(e) {}
+    }
+    const zip = localStorage.getItem('rr_zip');
+    if (zip) $('zip-input').value = zip;
+    // Start polling decoder status + now playing + streaming
+    this.pollTimer = setInterval(() => this.pollStatus(), 3000);
+    this.pollNowPlaying();
+    this.pollStreaming();
+    setInterval(() => this.pollNowPlaying(), 2000);
+    setInterval(() => this.pollStreaming(), 3000);
+    // Load tuner list
+    this.loadTuners();
+  },
+
+  // --- Tab switching ---
+  switchTab(tabId) {
+    document.querySelectorAll('.center-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    const idx = tabId === 'now-playing' ? 0 : 1;
+    document.querySelectorAll('.center-tab')[idx].classList.add('active');
+    $('tab-' + tabId).classList.add('active');
+    this.activeTab = tabId;
+  },
+
+  async api(path, method, body) {
+    const opts = { method: method || 'GET' };
+    if (body) {
+      opts.headers = { 'Content-Type': 'application/json' };
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch('/api/' + path, opts);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data;
+  },
+
+  toast(msg, type) {
+    const el = document.createElement('div');
+    el.className = 'toast toast-' + (type||'info');
+    el.textContent = msg;
+    $('toasts').appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  },
+
+  esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  },
+
+  // --- Tuner List ---
+  async loadTuners() {
+    try {
+      const r = await this.api('tuners');
+      const el = $('tuner-list');
+      if (!r.tuners || r.tuners.length === 0) {
+        el.innerHTML = '<span style="color:var(--text2);font-size:11px">No tuners detected</span>';
+        return;
+      }
+      el.innerHTML = r.tuners.map(t =>
+        `<div class="tuner-card"><span>${this.esc(t.name)}</span><span class="tuner-status ${t.status==='available'?'tuner-ok':'tuner-err'}">${t.status}</span></div>`
+      ).join('');
+    } catch(e) {
+      $('tuner-list').innerHTML = '<span style="color:var(--red);font-size:11px">Failed to load tuners</span>';
+    }
+  },
+
+  // --- RadioReference Login ---
+  async login() {
+    const user = $('rr-user').value.trim();
+    const pass = $('rr-pass').value.trim();
+    if (!user || !pass) { this.toast('Enter username and password', 'error'); return; }
+    $('btn-login').disabled = true;
+    $('btn-login').innerHTML = '<span class="spinner"></span> Logging in...';
+    try {
+      const r = await this.api('rr/login', 'POST', { username: user, password: pass });
+      this.rr = { loggedIn:true, username:r.username, expires:r.expires };
+      $('login-form').style.display = 'none';
+      $('login-ok').style.display = '';
+      $('login-user').textContent = r.username;
+      $('login-exp').textContent = r.expires;
+      $('sec-systems').style.display = '';
+      $('hdr-rr-dot').className = 'dot dot-on';
+      $('hdr-rr-text').textContent = 'RR: ' + r.username;
+      if ($('rr-save').checked) {
+        localStorage.setItem('rr_creds', JSON.stringify({ u:user, p:pass }));
+      }
+      this.toast('Logged in as ' + r.username, 'success');
+    } catch(e) {
+      this.toast(e.message || 'Login failed', 'error');
+    }
+    $('btn-login').disabled = false;
+    $('btn-login').textContent = 'Login';
+  },
+
+  logout() {
+    this.rr = { loggedIn:false, username:'', expires:'' };
+    $('login-form').style.display = '';
+    $('login-ok').style.display = 'none';
+    $('sec-systems').style.display = 'none';
+    $('sec-sites').style.display = 'none';
+    $('hdr-rr-dot').className = 'dot dot-off';
+    $('hdr-rr-text').textContent = 'RadioReference: Not Connected';
+    this.talkgroups = [];
+    this.sites = [];
+    this.renderTG();
+    localStorage.removeItem('rr_creds');
+    this.api('rr/logout', 'POST').catch(()=>{});
+  },
+
+  // --- System Discovery ---
+  async searchZip() {
+    const zip = $('zip-input').value.trim();
+    if (!zip || zip.length < 5) { this.toast('Enter a 5-digit zip code', 'error'); return; }
+    localStorage.setItem('rr_zip', zip);
+    $('btn-zip').disabled = true;
+    $('btn-zip').innerHTML = '<span class="spinner"></span>';
+    try {
+      const r = await this.api('rr/zip?code=' + encodeURIComponent(zip));
+      $('zip-info').style.display = '';
+      $('zip-info').textContent = r.county_name + ', ' + r.state_name;
+      const sys = await this.api('rr/systems?county_id=' + r.county_id);
+      this.systems = sys.systems || [];
+      this.renderSystems();
+    } catch(e) {
+      this.toast(e.message || 'Zip lookup failed', 'error');
+    }
+    $('btn-zip').disabled = false;
+    $('btn-zip').textContent = 'Search';
+  },
+
+  renderSystems() {
+    const el = $('system-list');
+    if (!this.systems.length) { el.innerHTML = '<div style="color:var(--text2);font-size:12px">No systems found</div>'; return; }
+    el.innerHTML = this.systems.map(s =>
+      `<div class="sys-item${s.system_id===this.selectedSysId?' active':''}" onclick="App.loadSystem(${s.system_id})">
+        <span>${this.esc(s.name)}</span>
+        <span class="sys-type">${this.esc(String(s.type_id))}</span>
+      </div>`
+    ).join('');
+  },
+
+  async loadSystem(sysId) {
+    this.selectedSysId = sysId;
+    this.renderSystems();
+    $('tg-container').innerHTML = '<div class="tg-empty"><span class="spinner"></span> Loading talkgroups...</div>';
+    try {
+      const [tgRes, sitesRes] = await Promise.all([
+        this.api('rr/talkgroups?system_id=' + sysId),
+        this.api('rr/sites?system_id=' + sysId)
+      ]);
+      this.talkgroups = tgRes.talkgroups || [];
+      this.sites = sitesRes.sites || [];
+      this.renderTG();
+      this.renderSites();
+      this.autoFillFreq();
+    } catch(e) {
+      this.toast(e.message || 'Failed to load system', 'error');
+      $('tg-container').innerHTML = '<div class="tg-empty" style="color:var(--red)">Error loading talkgroups</div>';
+    }
+  },
+
+  autoFillFreq() {
+    if ($('ctrl-freq').value) return;
+    for (const site of this.sites) {
+      for (const f of (site.freqs||[])) {
+        if (f.is_control && f.frequency > 0) {
+          $('ctrl-freq').value = f.frequency.toFixed(4);
+          return;
+        }
+      }
+    }
+  },
+
+  // --- Talkgroup Rendering ---
+  renderTG() {
+    const search = ($('tg-search').value || '').toLowerCase();
+    let tgs = this.talkgroups;
+    if (search) tgs = tgs.filter(t =>
+      t.alpha_tag.toLowerCase().includes(search) ||
+      t.description.toLowerCase().includes(search) ||
+      t.tag.toLowerCase().includes(search) ||
+      String(t.tg_dec).includes(search)
+    );
+    if (!tgs.length) {
+      $('tg-container').innerHTML = this.talkgroups.length
+        ? '<div class="tg-empty">No talkgroups match your search.</div>'
+        : '<div class="tg-empty">Login to RadioReference and select a system to browse talkgroups.</div>';
+      $('tg-footer').style.display = 'none';
+      return;
+    }
+    // Group by tag
+    const groups = {};
+    tgs.forEach(t => {
+      const cat = t.tag || 'Other';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(t);
+    });
+    let html = '';
+    for (const [cat, items] of Object.entries(groups).sort((a,b) => a[0].localeCompare(b[0]))) {
+      const catId = 'cat-' + cat.replace(/\W/g, '_');
+      html += `<div class="cat-header" onclick="App.toggleCat('${catId}')"><span>&#9660; ${this.esc(cat)}</span><span class="cat-badge">${items.length}</span></div>`;
+      html += `<div id="${catId}"><table class="tg-table"><tbody>`;
+      items.forEach(t => {
+        const sel = this.selectedTGs.has(t.tg_dec);
+        const modeClass = 'mode-' + (t.mode || '?');
+        const enc = t.encryption > 0 ? '<span class="enc-icon" title="Encrypted">&#128274;</span>' : '';
+        html += `<tr class="${sel?'selected':''}" onclick="App.toggleTG(${t.tg_dec})">
+          <td><input type="checkbox" ${sel?'checked':''} onclick="event.stopPropagation();App.toggleTG(${t.tg_dec})"></td>
+          <td class="tg-id">${t.tg_dec}</td>
+          <td>${this.esc(t.alpha_tag)}</td>
+          <td>${this.esc(t.description)}</td>
+          <td><span class="mode-badge ${modeClass}">${t.mode||'?'}</span></td>
+          <td>${enc}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+    $('tg-container').innerHTML = html;
+    $('tg-footer').style.display = '';
+    $('tg-count').textContent = tgs.length + ' talkgroups' + (search ? ' (filtered)' : '') + ' in ' + Object.keys(groups).length + ' categories';
+  },
+
+  filterTG() { this.renderTG(); },
+
+  toggleCat(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const hdr = el.previousElementSibling;
+    if (el.style.display === 'none') {
+      el.style.display = '';
+      hdr.querySelector('span').innerHTML = '&#9660; ' + hdr.querySelector('span').innerHTML.substring(2);
+    } else {
+      el.style.display = 'none';
+      hdr.querySelector('span').innerHTML = '&#9654; ' + hdr.querySelector('span').innerHTML.substring(2);
+    }
+  },
+
+  toggleTG(tgDec) {
+    if (this.selectedTGs.has(tgDec)) this.selectedTGs.delete(tgDec);
+    else this.selectedTGs.add(tgDec);
+    this.renderTG();
+    this.renderSel();
+  },
+
+  clearSel() {
+    this.selectedTGs.clear();
+    this.renderTG();
+    this.renderSel();
+  },
+
+  renderSel() {
+    const el = $('sel-list');
+    $('sel-count').textContent = this.selectedTGs.size;
+    if (!this.selectedTGs.size) {
+      el.innerHTML = '<div style="color:var(--text2);font-size:11px">No talkgroups selected</div>';
+      return;
+    }
+    let html = '';
+    this.selectedTGs.forEach(id => {
+      const t = this.talkgroups.find(x => x.tg_dec === id);
+      const name = t ? t.alpha_tag : '';
+      html += `<div class="sel-item"><span><span class="tg-id">${id}</span> ${this.esc(name)}</span><span class="sel-remove" onclick="event.stopPropagation();App.toggleTG(${id})">&times;</span></div>`;
+    });
+    el.innerHTML = html;
+  },
+
+  // --- Sites ---
+  renderSites() {
+    if (!this.sites.length) { $('sec-sites').style.display = 'none'; return; }
+    $('sec-sites').style.display = '';
+    $('sites-list').innerHTML = this.sites.map(s => {
+      const freqHtml = (s.freqs||[]).map(f =>
+        `<div class="freq-item ${f.is_control?'freq-ctrl':''}">${f.frequency.toFixed(4)} MHz${f.is_control?' [CTRL]':''}</div>`
+      ).join('');
+      return `<div class="site-card"><div class="site-name">Site ${s.site_number} (RFSS ${s.rfss})</div><div style="color:var(--text2);margin-bottom:4px">${this.esc(s.description)}</div>${freqHtml}</div>`;
+    }).join('');
+  },
+
+  // --- Decoder Control ---
+  async startDec() {
+    const freq = $('ctrl-freq').value.trim();
+    if (!freq) { this.toast('Set a control frequency', 'error'); return; }
+    const tgs = [...this.selectedTGs];
+    const all = $('follow-all').checked;
+    if (!tgs.length && !all) { this.toast('Select talkgroups or check Follow All', 'error'); return; }
+    $('btn-start').disabled = true;
+    try {
+      await this.api('decoder/start', 'POST', {
+        control_freq: String(Math.round(parseFloat(freq) * 1e6)),
+        talkgroups: tgs,
+        follow_all: all
+      });
+      this.decoderRunning = true;
+      $('btn-start').style.display = 'none';
+      $('btn-stop').style.display = '';
+      $('hdr-dec-dot').className = 'dot dot-on';
+      $('hdr-dec-text').textContent = 'Decoder: Running';
+      $('sb-dot').className = 'dot dot-on';
+      $('sb-state').textContent = 'Running';
+      this.toast('Decoder started', 'success');
+    } catch(e) {
+      this.toast(e.message || 'Failed to start decoder', 'error');
+    }
+    $('btn-start').disabled = false;
+  },
+
+  async stopDec() {
+    try {
+      await this.api('decoder/stop', 'POST');
+      this.decoderRunning = false;
+      $('btn-stop').style.display = 'none';
+      $('btn-start').style.display = '';
+      $('hdr-dec-dot').className = 'dot dot-off';
+      $('hdr-dec-text').textContent = 'Decoder: Idle';
+      $('sb-dot').className = 'dot dot-off';
+      $('sb-state').textContent = 'Idle';
+      $('sb-tg').textContent = '--';
+      $('sb-freq').textContent = '--';
+      this.toast('Decoder stopped', 'success');
+    } catch(e) {
+      this.toast(e.message || 'Failed to stop decoder', 'error');
+    }
+  },
+
+  async pollStatus() {
+    try {
+      const s = await this.api('decoder/status');
+      if (s.running && !this.decoderRunning) {
+        this.decoderRunning = true;
+        $('btn-start').style.display = 'none';
+        $('btn-stop').style.display = '';
+        $('hdr-dec-dot').className = 'dot dot-on';
+        $('hdr-dec-text').textContent = 'Decoder: Running';
+        $('sb-dot').className = 'dot dot-on';
+        $('sb-state').textContent = 'Running';
+      } else if (!s.running && this.decoderRunning) {
+        this.decoderRunning = false;
+        $('btn-stop').style.display = 'none';
+        $('btn-start').style.display = '';
+        $('hdr-dec-dot').className = 'dot dot-off';
+        $('hdr-dec-text').textContent = 'Decoder: Idle';
+        $('sb-dot').className = 'dot dot-off';
+        $('sb-state').textContent = 'Idle';
+      }
+      if (s.active_tg) $('sb-tg').textContent = s.active_tg;
+      if (s.active_freq) $('sb-freq').textContent = (s.active_freq / 1e6).toFixed(4) + ' MHz';
+      if (s.log && s.log.length) {
+        const box = $('log-box');
+        s.log.forEach(line => {
+          const d = document.createElement('div');
+          d.className = 'log-line' + (line.includes('CALL START') || line.includes('started') ? ' call' : line.includes('Error') || line.includes('error') ? ' err' : '');
+          d.textContent = line;
+          box.appendChild(d);
+        });
+        // Keep last 100 lines
+        while (box.children.length > 100) box.removeChild(box.firstChild);
+        box.scrollTop = box.scrollHeight;
+      }
+    } catch(e) { /* silent */ }
+  },
+
+  // --- Now Playing ---
+  async pollNowPlaying() {
+    try {
+      const r = await this.api('channels/now-playing');
+      this.nowPlayingChannels = r.channels || [];
+      this.renderNowPlaying();
+    } catch(e) { /* silent */ }
+  },
+
+  renderNowPlaying() {
+    const chs = this.nowPlayingChannels;
+    $('np-count').textContent = chs.length + ' channel' + (chs.length !== 1 ? 's' : '');
+    if (!chs.length) {
+      $('np-table-wrap').innerHTML = '<div class="np-empty">No active channels</div>';
+      return;
+    }
+    let html = '<table class="np-table"><thead><tr>';
+    html += '<th>Status</th><th>Decoder</th><th>From</th><th>Alias</th><th>To</th><th>Alias</th><th>Channel</th><th>Frequency</th><th>Channel Name</th>';
+    html += '</tr></thead><tbody>';
+    chs.forEach(ch => {
+      const stateClass = 'np-state-' + (ch.state || 'IDLE');
+      const freq = ch.frequency ? (ch.frequency / 1e6).toFixed(4) : '';
+      html += '<tr>';
+      html += '<td><span class="np-state ' + stateClass + '">' + this.esc(ch.state || '') + '</span></td>';
+      html += '<td>' + this.esc(ch.decoder || '') + '</td>';
+      html += '<td class="np-from">' + this.esc(ch.from || '') + '</td>';
+      html += '<td>' + this.esc(ch.from_alias || '') + '</td>';
+      html += '<td class="np-to">' + this.esc(ch.to || '') + '</td>';
+      html += '<td>' + this.esc(ch.to_alias || '') + '</td>';
+      html += '<td>' + this.esc(ch.channel || '') + '</td>';
+      html += '<td class="np-freq">' + this.esc(freq) + '</td>';
+      html += '<td>' + this.esc(ch.channel_name || '') + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    $('np-table-wrap').innerHTML = html;
+  },
+
+  // --- Streaming Status ---
+  async pollStreaming() {
+    try {
+      const r = await this.api('streaming/status');
+      this.streams = r.streams || [];
+      this.renderStreaming();
+    } catch(e) { /* silent */ }
+  },
+
+  renderStreaming() {
+    const sts = this.streams;
+    if (!sts.length) {
+      $('stream-table-wrap').innerHTML = '<div class="stream-empty">No streams configured</div>';
+      return;
+    }
+    let html = '<table class="stream-table"><thead><tr>';
+    html += '<th>Streaming</th><th>Name</th><th>Status</th><th>Queued</th><th>Streamed/Uploaded</th><th>Aged Off</th><th>Upload Error</th>';
+    html += '</tr></thead><tbody>';
+    sts.forEach(s => {
+      const stateLabel = s.state || 'Unknown';
+      const stateClass = s.error_state ? 'stream-state-error' : 'stream-state-' + stateLabel.replace(/\s/g, '');
+      html += '<tr>';
+      html += '<td>' + this.esc(s.server_type || '') + '</td>';
+      html += '<td>' + this.esc(s.name || '') + '</td>';
+      html += '<td><span class="stream-state ' + stateClass + '">' + this.esc(stateLabel) + '</span></td>';
+      html += '<td>' + (s.queue_size || 0) + '</td>';
+      html += '<td>' + (s.streamed_count || 0) + '</td>';
+      html += '<td>' + (s.aged_off_count || 0) + '</td>';
+      html += '<td>' + (s.error_count || 0) + '</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    $('stream-table-wrap').innerHTML = html;
+  }
+};
+
+// Watch control inputs
+['ctrl-freq','follow-all'].forEach(id => {
+  $(id).addEventListener('change', () => {});
+  $(id).addEventListener('input', () => {});
+});
+
+App.init();
+</script>
+</body>
+</html>
